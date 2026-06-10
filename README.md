@@ -13,9 +13,9 @@ Implemented features:
 
 Architecture summary:
 
-The application uses a single source of truth in React state for the list of notes. Each note stores position, size, label and z-index. The board is a relative container, and notes are rendered as absolutely positioned elements. Drag operations are handled with pointer events and shared movement logic so note position and resizing remain smooth, responsive, and constrained within the board bounds.
+The application uses a single source of truth in React state for the list of notes. Each note stores position, size, label and z-index, while the board is a relative container that renders notes as absolutely positioned elements. Drag operations are handled with pointer events and shared geometry helpers so movement and resizing remain smooth, responsive, and constrained within the board bounds.
 
-A small form-driven creation UI lets the user define the initial note geometry before creating it. Notes are also brought to the front when interaction begins, which improves usability when notes overlap. The trash zone is a fixed board target; while moving a note, the app checks whether the note center is inside that target, highlights the zone, and removes the note on pointer release.
+A small form-driven UI lets the user define the initial note geometry before creating it and update the width or height of the currently selected note afterward. Notes are brought to the front when interaction begins, which improves usability when notes overlap. The trash zone is a fixed board target; while moving a note, the app checks whether the note center is inside that target, highlights the zone, and removes the note on pointer release.
 
 Build and run instructions:
 
