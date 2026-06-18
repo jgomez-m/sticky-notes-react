@@ -1,337 +1,235 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Board } from './components/Board';
+import { NoteForm } from './components/NoteForm';
+import { clamp } from './geometry';
+import type { Note, NoteColor, NoteFormState } from './types';
+import { MAX_HEIGHT, MAX_WIDTH, MIN_SIZE, NOTE_COLORS, STORAGE_KEY } from './types';
 
-type Note = {
-  id: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  zIndex: number;
-  label: string;
+const createId = () => crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+
+const initialForm: NoteFormState = {
+  x: 100,
+  y: 100,
+  width: 220,
+  height: 180,
+  label: 'New note',
+  content: 'Double-click this text to edit the note.',
+  color: 'yellow',
 };
 
-type ActiveDrag = {
-  id: string;
-  mode: 'move' | 'resize';
-  startX: number;
-  startY: number;
-  origX: number;
-  origY: number;
-  origWidth: number;
-  origHeight: number;
+const isNoteColor = (value: unknown): value is NoteColor =>
+  typeof value === 'string' && NOTE_COLORS.some((color) => color.id === value);
+
+const normalizeNote = (value: unknown): Note | null => {
+  if (!value || typeof value !== 'object') return null;
+
+  const note = value as Partial<Note>;
+  if (typeof note.id !== 'string') return null;
+
+  return {
+    id: note.id,
+    x: Number.isFinite(note.x) ? Number(note.x) : initialForm.x,
+    y: Number.isFinite(note.y) ? Number(note.y) : initialForm.y,
+    width: Number.isFinite(note.width) ? Math.max(Number(note.width), MIN_SIZE) : initialForm.width,
+    height: Number.isFinite(note.height) ? Math.max(Number(note.height), MIN_SIZE) : initialForm.height,
+    zIndex: Number.isFinite(note.zIndex) ? Number(note.zIndex) : 1,
+    label: typeof note.label === 'string' && note.label.trim() ? note.label : 'Sticky note',
+    content: typeof note.content === 'string' ? note.content : '',
+    color: isNoteColor(note.color) ? note.color : 'yellow',
+  };
 };
 
-const MIN_SIZE = 100;
-const MAX_WIDTH = 1200;
-const MAX_HEIGHT = 950;
-const TRASH_ZONE = {
-  width: 180,
-  height: 118,
-  margin: 24,
-};
+const loadNotes = () => {
+  try {
+    const storedNotes = window.localStorage.getItem(STORAGE_KEY);
+    if (!storedNotes) return [];
 
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+    const parsed = JSON.parse(storedNotes);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.map(normalizeNote).filter((note): note is Note => Boolean(note));
+  } catch {
+    return [];
+  }
+};
 
 function App() {
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [form, setForm] = useState({ x: 100, y: 100, width: 220, height: 180, label: 'New note' });
+  const [notes, setNotes] = useState<Note[]>(loadNotes);
+  const [form, setForm] = useState<NoteFormState>(initialForm);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
-  const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
-  const [isOverTrash, setIsOverTrash] = useState(false);
-  const [topZ, setTopZ] = useState(1);
-  const boardRef = useRef<HTMLDivElement | null>(null);
-
-  // Reads the live board size so dragging and resizing stay within the visible workspace.
-  const getBoardBounds = () => {
-    if (!boardRef.current) {
-      return { width: MAX_WIDTH, height: MAX_HEIGHT };
-    }
-    return {
-      width: boardRef.current.clientWidth,
-      height: boardRef.current.clientHeight,
-    };
-  };
-
-  // Keeps the trash target aligned with the visual zone rendered in the board.
-  const getTrashBounds = () => {
-    const bounds = getBoardBounds();
-    return {
-      x: Math.max(TRASH_ZONE.margin, bounds.width - TRASH_ZONE.width - TRASH_ZONE.margin),
-      y: Math.max(TRASH_ZONE.margin, bounds.height - TRASH_ZONE.height - TRASH_ZONE.margin),
-      width: TRASH_ZONE.width,
-      height: TRASH_ZONE.height,
-    };
-  };
-
-  // Reconstructs the dragged note rectangle from the original drag snapshot and pointer delta.
-  const getDraggedNoteRect = (drag: ActiveDrag, event: PointerEvent | React.PointerEvent) => {
-    const bounds = getBoardBounds();
-    const nextX = drag.origX + event.clientX - drag.startX;
-    const nextY = drag.origY + event.clientY - drag.startY;
-
-    return {
-      x: clamp(nextX, 0, bounds.width - drag.origWidth),
-      y: clamp(nextY, 0, bounds.height - drag.origHeight),
-      width: drag.origWidth,
-      height: drag.origHeight,
-    };
-  };
-
-  // A note is removed only when its center is released inside the trash zone.
-  const isNoteOverTrash = (drag: ActiveDrag, event: PointerEvent | React.PointerEvent) => {
-    if (drag.mode !== 'move') {
-      return false;
-    }
-
-    const noteRect = getDraggedNoteRect(drag, event);
-    const trashRect = getTrashBounds();
-    const noteCenterX = noteRect.x + noteRect.width / 2;
-    const noteCenterY = noteRect.y + noteRect.height / 2;
-
-    return (
-      noteCenterX >= trashRect.x &&
-      noteCenterX <= trashRect.x + trashRect.width &&
-      noteCenterY >= trashRect.y &&
-      noteCenterY <= trashRect.y + trashRect.height
-    );
-  };
+  const [topZ, setTopZ] = useState(() => notes.reduce((max, note) => Math.max(max, note.zIndex), 1));
 
   useEffect(() => {
-    if (!activeDrag) {
-      return undefined;
-    }
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+  }, [notes]);
 
-    const onPointerMove = (event: PointerEvent) => {
-      const bounds = getBoardBounds();
-      setIsOverTrash(isNoteOverTrash(activeDrag, event));
+  const selectedNote = useMemo(
+    () => notes.find((note) => note.id === selectedNoteId) ?? null,
+    [notes, selectedNoteId],
+  );
 
-      setNotes((current) =>
-        current.map((note) => {
-          if (note.id !== activeDrag.id) return note;
+  const createNote = useCallback(
+    (overrides: Partial<Pick<Note, 'x' | 'y' | 'width' | 'height' | 'label' | 'content' | 'color'>> = {}) => {
+      const width = clamp(overrides.width ?? form.width, MIN_SIZE, MAX_WIDTH);
+      const height = clamp(overrides.height ?? form.height, MIN_SIZE, MAX_HEIGHT);
+      const nextZ = topZ + 1;
+      const newNote: Note = {
+        id: createId(),
+        x: clamp(overrides.x ?? form.x, 0, MAX_WIDTH - width),
+        y: clamp(overrides.y ?? form.y, 0, MAX_HEIGHT - height),
+        width,
+        height,
+        zIndex: nextZ,
+        label: (overrides.label ?? form.label).trim() || 'Sticky note',
+        content: overrides.content ?? form.content,
+        color: overrides.color ?? form.color,
+      };
 
-          if (activeDrag.mode === 'move') {
-            const nextX = activeDrag.origX + event.clientX - activeDrag.startX;
-            const nextY = activeDrag.origY + event.clientY - activeDrag.startY;
-            const x = clamp(nextX, 0, bounds.width - note.width);
-            const y = clamp(nextY, 0, bounds.height - note.height);
+      setNotes((current) => [...current, newNote]);
+      setSelectedNoteId(newNote.id);
+      setTopZ(nextZ);
+      setForm({
+        x: newNote.x,
+        y: newNote.y,
+        width: newNote.width,
+        height: newNote.height,
+        label: newNote.label,
+        content: newNote.content,
+        color: newNote.color,
+      });
+    },
+    [form, topZ],
+  );
 
-            if (note.id === selectedNoteId) {
-              setForm((prev) => ({ ...prev, x, y }));
-            }
+  const createNoteAt = useCallback(
+    (x: number, y: number) => {
+      createNote({ x, y });
+    },
+    [createNote],
+  );
 
-            return {
-              ...note,
-              x,
-              y,
-            };
-          }
+  const updateNote = useCallback((noteId: string, updates: Partial<Omit<Note, 'id'>>) => {
+    setNotes((current) =>
+      current.map((note) => (note.id === noteId ? { ...note, ...updates } : note)),
+    );
+  }, []);
 
-          const nextWidth = clamp(activeDrag.origWidth + event.clientX - activeDrag.startX, MIN_SIZE, bounds.width - note.x);
-          const nextHeight = clamp(activeDrag.origHeight + event.clientY - activeDrag.startY, MIN_SIZE, bounds.height - note.y);
-
-          if (note.id === selectedNoteId) {
-            setForm((prev) => ({ ...prev, width: nextWidth, height: nextHeight }));
-          }
-
-          return {
-            ...note,
-            width: nextWidth,
-            height: nextHeight,
-          };
-        }),
+  const commitGeometry = useCallback(
+    (noteId: string, geometry: Pick<Note, 'x' | 'y' | 'width' | 'height'>) => {
+      updateNote(noteId, geometry);
+      setForm((current) =>
+        selectedNoteId === noteId
+          ? { ...current, ...geometry }
+          : current,
       );
-    };
+    },
+    [selectedNoteId, updateNote],
+  );
 
-    const onPointerUp = (event: PointerEvent) => {
-      if (isNoteOverTrash(activeDrag, event)) {
-        setNotes((current) => current.filter((note) => note.id !== activeDrag.id));
-        setSelectedNoteId((current) => (current === activeDrag.id ? null : current));
+  const deleteNote = useCallback((noteId: string) => {
+    setNotes((current) => current.filter((note) => note.id !== noteId));
+    setSelectedNoteId((current) => (current === noteId ? null : current));
+  }, []);
+
+  const selectNote = useCallback(
+    (noteId: string) => {
+      const note = notes.find((item) => item.id === noteId);
+      if (!note) return;
+
+      setSelectedNoteId(noteId);
+      setForm({
+        x: note.x,
+        y: note.y,
+        width: note.width,
+        height: note.height,
+        label: note.label,
+        content: note.content,
+        color: note.color,
+      });
+    },
+    [notes],
+  );
+
+  const bringToFront = useCallback((noteId: string) => {
+    setTopZ((currentTopZ) => {
+      const nextZ = currentTopZ + 1;
+      setNotes((current) =>
+        current.map((note) => (note.id === noteId ? { ...note, zIndex: nextZ } : note)),
+      );
+      return nextZ;
+    });
+  }, []);
+
+  const updateForm = useCallback(
+    (updates: Partial<NoteFormState>) => {
+      setForm((current) => ({ ...current, ...updates }));
+
+      if (!selectedNoteId) return;
+
+      const selected = notes.find((note) => note.id === selectedNoteId);
+      if (!selected) return;
+
+      const noteUpdates: Partial<Omit<Note, 'id'>> = {};
+      if (updates.width !== undefined) {
+        noteUpdates.width = clamp(updates.width, MIN_SIZE, MAX_WIDTH - selected.x);
       }
+      if (updates.height !== undefined) {
+        noteUpdates.height = clamp(updates.height, MIN_SIZE, MAX_HEIGHT - selected.y);
+      }
+      if (updates.label !== undefined) {
+        noteUpdates.label = updates.label.trim() || 'Sticky note';
+      }
+      if (updates.color !== undefined) {
+        noteUpdates.color = updates.color;
+      }
+      if (Object.keys(noteUpdates).length > 0) {
+        updateNote(selectedNoteId, noteUpdates);
+      }
+    },
+    [notes, selectedNoteId, updateNote],
+  );
 
-      setActiveDrag(null);
-      setIsOverTrash(false);
-    };
+  const handleInlineUpdate = useCallback(
+    (noteId: string, updates: Partial<Omit<Note, 'id'>>) => {
+      updateNote(noteId, updates);
 
-    window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', onPointerUp);
-    return () => {
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', onPointerUp);
-    };
-  }, [activeDrag, selectedNoteId]);
-
-  // Creates a note from the current form values and immediately selects it for later edits.
-  const createNote = () => {
-    const bounds = getBoardBounds();
-    const width = clamp(form.width, MIN_SIZE, bounds.width);
-    const height = clamp(form.height, MIN_SIZE, bounds.height);
-    const newNote: Note = {
-      id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
-      x: clamp(form.x, 0, bounds.width - width),
-      y: clamp(form.y, 0, bounds.height - height),
-      width,
-      height,
-      zIndex: topZ + 1,
-      label: form.label || 'Sticky note',
-    };
-
-    setNotes((current) => [...current, newNote]);
-    setSelectedNoteId(newNote.id);
-    setTopZ((current) => current + 1);
-  };
-
-  // Lets the width and height inputs resize the currently selected note as well as future notes.
-  const resizeSelectedNote = (dimension: 'width' | 'height', value: number) => {
-    setForm((prev) => ({ ...prev, [dimension]: value }));
-
-    if (!selectedNoteId) {
-      return;
-    }
-
-    const bounds = getBoardBounds();
-    setNotes((current) =>
-      current.map((note) => {
-        if (note.id !== selectedNoteId) return note;
-
-        if (dimension === 'width') {
-          return {
-            ...note,
-            width: clamp(value, MIN_SIZE, bounds.width - note.x),
-          };
-        }
-
-        return {
-          ...note,
-          height: clamp(value, MIN_SIZE, bounds.height - note.y),
-        };
-      }),
-    );
-  };
-
-  // Stores a drag snapshot so pointer movement can update note geometry without layout jumps.
-  const handleStartDrag = (noteId: string, mode: ActiveDrag['mode'], event: React.PointerEvent<HTMLDivElement>) => {
-    event.stopPropagation();
-    const note = notes.find((item) => item.id === noteId);
-    if (!note) return;
-
-    setSelectedNoteId(noteId);
-    setForm({
-      x: note.x,
-      y: note.y,
-      width: note.width,
-      height: note.height,
-      label: note.label,
-    });
-
-    setNotes((current) =>
-      current.map((item) => (item.id === noteId ? { ...item, zIndex: topZ + 1 } : item)),
-    );
-    setTopZ((current) => current + 1);
-
-    setActiveDrag({
-      id: noteId,
-      mode,
-      startX: event.clientX,
-      startY: event.clientY,
-      origX: note.x,
-      origY: note.y,
-      origWidth: note.width,
-      origHeight: note.height,
-    });
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
+      if (noteId === selectedNoteId) {
+        setForm((current) => ({
+          ...current,
+          ...(updates.label !== undefined ? { label: updates.label } : null),
+          ...(updates.content !== undefined ? { content: updates.content } : null),
+          ...(updates.color !== undefined ? { color: updates.color } : null),
+        }));
+      }
+    },
+    [selectedNoteId, updateNote],
+  );
 
   return (
     <div className="app-shell">
       <header className="app-header">
         <div>
           <h1>Sticky Notes</h1>
-          <p>Use the form to create notes, drag notes to move them, and resize by dragging the corner handle.</p>
+          <p>Create, edit, drag, resize, color and persist notes directly on the board.</p>
         </div>
-        <div className="note-form">
-          <label>
-            X
-            <input
-              type="number"
-              value={form.x}
-              min={0}
-              max={MAX_WIDTH}
-              onChange={(event) => setForm((prev) => ({ ...prev, x: Number(event.target.value) }))}
-            />
-          </label>
-          <label>
-            Y
-            <input
-              type="number"
-              value={form.y}
-              min={0}
-              max={MAX_HEIGHT}
-              onChange={(event) => setForm((prev) => ({ ...prev, y: Number(event.target.value) }))}
-            />
-          </label>
-          <label>
-            Width
-            <input
-              type="number"
-              value={form.width}
-              min={MIN_SIZE}
-              max={MAX_WIDTH}
-              onChange={(event) => resizeSelectedNote('width', Number(event.target.value))}
-            />
-          </label>
-          <label>
-            Height
-            <input
-              type="number"
-              value={form.height}
-              min={MIN_SIZE}
-              max={MAX_HEIGHT}
-              onChange={(event) => resizeSelectedNote('height', Number(event.target.value))}
-            />
-          </label>
-          <label className="label-input">
-            Label
-            <input
-              type="text"
-              value={form.label}
-              onChange={(event) => setForm((prev) => ({ ...prev, label: event.target.value }))}
-            />
-          </label>
-          <button type="button" onClick={createNote} className="create-button">
-            Create note
-          </button>
-        </div>
+        <NoteForm
+          form={form}
+          selectedNote={selectedNote}
+          onChange={updateForm}
+          onCreate={() => createNote()}
+        />
       </header>
 
-      <main className="board-shell">
-        <div ref={boardRef} className="board">
-          {notes.map((note) => (
-            <div
-              key={note.id}
-              className={`note${note.id === selectedNoteId ? ' note--selected' : ''}`}
-              style={{
-                left: note.x,
-                top: note.y,
-                width: note.width,
-                height: note.height,
-                zIndex: note.zIndex,
-              }}
-              onPointerDown={(event) => handleStartDrag(note.id, 'move', event)}
-            >
-              <div className="note-header">{note.label}</div>
-              <div className="note-body">Drag anywhere to move. Resize from the corner. Drop on trash to remove.</div>
-              <div
-                className="resize-handle"
-                onPointerDown={(event) => handleStartDrag(note.id, 'resize', event)}
-              />
-            </div>
-          ))}
-          <div className={`trash-zone${isOverTrash ? ' trash-zone--active' : ''}`} aria-label="Trash zone">
-            <span className="trash-zone__icon">×</span>
-            <span>Trash</span>
-          </div>
-        </div>
-      </main>
+      <Board
+        notes={notes}
+        selectedNoteId={selectedNoteId}
+        onSelectNote={selectNote}
+        onBringToFront={bringToFront}
+        onCommitGeometry={commitGeometry}
+        onUpdateNote={handleInlineUpdate}
+        onDeleteNote={deleteNote}
+        onCreateNoteAt={createNoteAt}
+      />
     </div>
   );
 }

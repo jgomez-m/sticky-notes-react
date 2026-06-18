@@ -10,12 +10,18 @@ Implemented features:
 2. Move a note by dragging it anywhere inside the board.
 3. Resize a note by dragging the bottom-right corner handle.
 4. Remove a note by dragging it over the trash zone and releasing it.
+5. Create notes directly on the board by double-clicking an empty area.
+6. Rename the selected note from the form and edit note content inline.
+7. Persist notes in Local Storage and restore them on page load.
+8. Choose a note colour when creating a note.
 
 Architecture summary:
 
-The application uses a single source of truth in React state for the list of notes. Each note stores position, size, label and z-index, while the board is a relative container that renders notes as absolutely positioned elements. Drag operations are handled with pointer events and shared geometry helpers so movement and resizing remain smooth, responsive, and constrained within the board bounds.
+The application keeps the durable notes collection in `App`, while `Board`, `StickyNote` and `NoteForm` handle focused UI responsibilities. Shared geometry helpers centralize clamping, resizing and trash-zone hit detection, which keeps drag rules testable outside of rendering concerns. Notes are serialized to Local Storage whenever the collection changes and normalized on load to tolerate older or malformed saved data.
 
-A small form-driven UI lets the user define the initial note geometry before creating it and update the width or height of the currently selected note afterward. Notes are brought to the front when interaction begins, which improves usability when notes overlap. The trash zone is a fixed board target; while moving a note, the app checks whether the note center is inside that target, highlights the zone, and removes the note on pointer release.
+Drag and resize interactions are intentionally local to each `StickyNote`: pointer movement updates only that note's draft rectangle, and the parent state is committed once the pointer is released. This avoids re-rendering the whole board on every drag frame. `StickyNote` is memoized, so unchanged notes do not re-render when a sibling is being edited, dragged or resized.
+
+The form defines the next note and can resize or rename the selected note, while each sticky note keeps content editing inline. The note title is a non-editable drag surface, which keeps moving notes from the top edge predictable. The board supports double-click creation for faster workflows, notes move to the front when selected, and the trash target remains a fixed board-level drop zone.
 
 Build and run instructions:
 
@@ -31,10 +37,20 @@ Build and run instructions:
    ```bash
    npm run build
    ```
+4. Run unit tests:
+   ```bash
+   npm test
+   ```
 
 Project files:
 
-- `src/App.tsx` — main application logic, note creation and drag/resize handling.
+- `src/App.tsx` — main application state, persistence and note orchestration.
+- `src/components/Board.tsx` — board layout, double-click creation and trash-zone state.
+- `src/components/StickyNote.tsx` — memoized note rendering, inline editing and local drag/resize state.
+- `src/components/NoteForm.tsx` — note creation form and selected-note size controls.
+- `src/geometry.ts` — pure geometry helpers for clamping, resizing and trash-zone detection.
+- `src/types.ts` — shared note types and constants.
+- `src/App.test.tsx` — unit tests for creation, editing, persistence, drag, resize and deletion.
 - `src/main.tsx` — app bootstrap.
 - `src/index.css` — global styling and board layout.
 - `vite.config.ts` — Vite configuration.

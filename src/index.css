@@ -22,7 +22,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -69,16 +70,71 @@ input {
   color: #333;
 }
 
-.note-form input {
+.note-form input,
+.note-form textarea {
   width: 100%;
   border: 1px solid #cbd5e1;
   border-radius: 10px;
   padding: 10px 12px;
   background: #fff;
+  color: #1a1a1a;
 }
 
-.label-input {
+.note-form textarea {
+  resize: vertical;
+}
+
+.label-input,
+.content-input,
+.color-picker {
   grid-column: span 2;
+}
+
+.color-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.color-option {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  padding: 8px 10px;
+  border: 1px solid #d8dee8;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.color-option input {
+  width: auto;
+}
+
+.color-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+}
+
+.color-swatch--yellow {
+  background: #ffe66d;
+}
+
+.color-swatch--blue {
+  background: #a8d8ff;
+}
+
+.color-swatch--green {
+  background: #b7efc5;
+}
+
+.color-swatch--pink {
+  background: #ffc8dd;
 }
 
 .create-button {
@@ -112,6 +168,15 @@ input {
   overflow: hidden;
   box-shadow: 0 18px 55px rgba(16, 24, 40, 0.08);
   padding: 18px;
+}
+
+.board::after {
+  content: "";
+  position: absolute;
+  inset: 18px;
+  border: 1px dashed rgba(99, 110, 126, 0.18);
+  border-radius: 18px;
+  pointer-events: none;
 }
 
 .trash-zone {
@@ -160,15 +225,13 @@ input {
 
 .note {
   position: absolute;
-  background: linear-gradient(180deg, #fff9b7 0%, #fff3b7 100%);
-  border: 1px solid #e6d37c;
-  border-radius: 18px;
+  border-radius: 14px;
   box-shadow: 0 16px 30px rgba(15, 23, 42, 0.12);
   cursor: grab;
-  user-select: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.16);
 }
 
 .note:active {
@@ -180,22 +243,48 @@ input {
   outline-offset: 3px;
 }
 
-.note-header {
+.note--yellow {
+  background: linear-gradient(180deg, #fff9b7 0%, #fff3b7 100%);
+}
+
+.note--blue {
+  background: linear-gradient(180deg, #d8edff 0%, #b9dcff 100%);
+}
+
+.note--green {
+  background: linear-gradient(180deg, #ddf8e5 0%, #bff0cc 100%);
+}
+
+.note--pink {
+  background: linear-gradient(180deg, #ffe1ec 0%, #ffc6dc 100%);
+}
+
+.note-title {
   background: rgba(255, 255, 255, 0.75);
   padding: 12px 14px;
   font-weight: 700;
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  color: #202124;
+  cursor: grab;
+  user-select: none;
 }
 
 .note-body {
+  border: 0;
+  background: transparent;
   padding: 14px;
   color: #3b3b3b;
   flex: 1;
+  resize: none;
+  outline: none;
+  line-height: 1.45;
+  cursor: text;
 }
 
 .resize-handle {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
+  border: 0;
   border-radius: 6px;
   background: #f3d34e;
   position: absolute;
@@ -215,6 +304,8 @@ input {
   }
 
   .label-input,
+  .content-input,
+  .color-picker,
   .create-button {
     grid-column: auto;
   }
